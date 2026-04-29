@@ -26,6 +26,8 @@ MAX_RECOMMENDER_SCORE = (
     + ACOUSTIC_PREFERENCE_WEIGHT
 )
 
+ACOUSTIC_AVOID_THRESHOLD = 0.65
+
 GENRE_EXPECTED_ENERGY = {
     "ambient": 0.25,
     "classical": 0.22,
@@ -88,6 +90,26 @@ class RecommendationValidator:
             features.append("acousticness")
         return features
 
+    def constraint_conflicts(
+        self,
+        parsed_preferences: Union[ParsedPreferences, QueryParseResult],
+        song: Song,
+    ) -> List[str]:
+        preferences = self._normalize_preferences(parsed_preferences)
+        conflicts: List[str] = []
+
+        for constraint in preferences.avoid_constraints:
+            normalized_constraint = constraint.lower()
+            if normalized_constraint == "acoustic":
+                if song.acousticness >= ACOUSTIC_AVOID_THRESHOLD:
+                    conflicts.append(normalized_constraint)
+                continue
+
+            if normalized_constraint in {song.genre.lower(), song.mood.lower()}:
+                conflicts.append(normalized_constraint)
+
+        return conflicts
+
     def validate(
         self,
         parsed_preferences: Union[ParsedPreferences, QueryParseResult],
@@ -134,13 +156,17 @@ class RecommendationValidator:
             warnings.append("Top recommendation is only a weak fit on supporting features like energy, tempo, valence, danceability, or acousticness.")
             penalty += 0.15
 
-        if preferences.avoid_constraints:
-            top_attributes = {top_song.genre.lower(), top_song.mood.lower()}
-            if preferences.likes_acoustic is True:
-                top_attributes.add("acoustic")
-            if top_attributes & {constraint.lower() for constraint in preferences.avoid_constraints}:
-                warnings.append("Top recommendation conflicts with an explicit avoid constraint.")
-                penalty += 0.20
+        top_constraint_conflicts = self.constraint_conflicts(preferences, top_song)
+        if top_constraint_conflicts:
+            warnings.append(
+                "Top recommendation conflicts with an explicit avoid constraint. "
+                f"Conflicts: {', '.join(top_constraint_conflicts)}."
+            )
+            notes.append(
+                "Top recommendation violated explicit avoid constraints: "
+                f"{', '.join(top_constraint_conflicts)}."
+            )
+            penalty += 0.20
 
         confidence = (0.55 * normalized_top_score) + (0.30 * overall_fit) + (0.15 * evidence_support) - penalty
         confidence = max(0.0, min(1.0, confidence))

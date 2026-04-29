@@ -1,6 +1,6 @@
 """Command line runner for the retrieval-aware music recommendation assistant."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
 import sys
@@ -19,6 +19,19 @@ DEFAULT_DEMO_QUERIES = [
     "I want ambient songs with very high energy and acoustic feel",
 ]
 
+SELF_CHECK_CONSTRAINT_PENALTY = 1.05
+
+
+@dataclass
+class SelfCheckResult:
+    triggered: bool = False
+    reranked: bool = False
+    penalty_applied: float = 0.0
+    violated_constraints: List[str] = field(default_factory=list)
+    original_top_title: str = ""
+    final_top_title: str = ""
+    notes: List[str] = field(default_factory=list)
+
 
 @dataclass
 class AssistantResult:
@@ -27,6 +40,7 @@ class AssistantResult:
     user_profile: UserProfile
     retrieved_evidence: List[RetrievedSnippet]
     recommendations: List[Tuple[Song, float, str]]
+    self_check: SelfCheckResult
     validation: ValidationResult
 
 
@@ -43,6 +57,67 @@ def build_assistant_components() -> Tuple[Recommender, KnowledgeRetriever, Recom
     return recommender, retriever, validator
 
 
+def _apply_self_check(
+    parsed_result: QueryParseResult,
+    recommendations: List[Tuple[Song, float, str]],
+    validator: RecommendationValidator,
+    k: int,
+) -> Tuple[List[Tuple[Song, float, str]], SelfCheckResult]:
+    if not recommendations:
+        return [], SelfCheckResult()
+
+    original_top_song, _, _ = recommendations[0]
+    top_conflicts = validator.constraint_conflicts(parsed_result, original_top_song)
+    if not top_conflicts:
+        return recommendations[:k], SelfCheckResult(
+            original_top_title=original_top_song.title,
+            final_top_title=original_top_song.title,
+        )
+
+    adjusted_recommendations: List[Tuple[Song, float, str]] = []
+    for song, score, explanation in recommendations:
+        conflicts = validator.constraint_conflicts(parsed_result, song)
+        adjusted_score = score
+        adjusted_explanation = explanation
+        if conflicts:
+            penalty = SELF_CHECK_CONSTRAINT_PENALTY * len(conflicts)
+            adjusted_score -= penalty
+            adjusted_explanation = (
+                f"{explanation}; self-check penalty (-{penalty:.2f} for avoid constraints: {', '.join(conflicts)})"
+            )
+        adjusted_recommendations.append((song, adjusted_score, adjusted_explanation))
+
+    adjusted_recommendations.sort(key=lambda item: (-item[1], item[0].title))
+    final_top_song, _, _ = adjusted_recommendations[0]
+    reranked = final_top_song.title != original_top_song.title
+    top_penalty = SELF_CHECK_CONSTRAINT_PENALTY * len(top_conflicts)
+
+    notes = [
+        "Initial top recommendation conflicted with avoid constraints: "
+        f"{', '.join(top_conflicts)}.",
+    ]
+    if reranked:
+        notes.append(
+            f"Applied a self-check penalty of {SELF_CHECK_CONSTRAINT_PENALTY:.2f} per violated avoid constraint "
+            f"and reranked '{final_top_song.title}' ahead of '{original_top_song.title}'."
+        )
+    else:
+        notes.append(
+            f"Applied a self-check penalty of {SELF_CHECK_CONSTRAINT_PENALTY:.2f} per violated avoid constraint, "
+            "but the original top recommendation remained the best available match."
+        )
+
+    return adjusted_recommendations[:k], SelfCheckResult(
+        triggered=True,
+        reranked=reranked,
+        penalty_applied=top_penalty,
+        violated_constraints=top_conflicts,
+        original_top_title=original_top_song.title,
+        final_top_title=final_top_song.title,
+        notes=notes,
+    )
+
+
 def run_assistant_query(
     raw_query: str,
     recommender: Recommender,
@@ -53,8 +128,16 @@ def run_assistant_query(
     parsed_result = parse_query(raw_query)
     user_profile = parsed_result.preferences.to_user_profile(default_likes_acoustic=False)
     retrieved_evidence = retriever.retrieve(parsed_result, top_k=3)
-    recommendations = recommender.recommend(user_profile, k=k)
+    ranked_recommendations = recommender.recommend(user_profile, k=len(recommender.songs))
+    recommendations, self_check = _apply_self_check(parsed_result, ranked_recommendations, validator, k)
     validation = validator.validate(parsed_result, retrieved_evidence, recommendations)
+
+    if self_check.triggered:
+        validation.warnings.insert(
+            0,
+            "Self-check detected an explicit avoid-constraint conflict on the initial top recommendation.",
+        )
+        validation.validation_notes.extend(self_check.notes)
 
     return AssistantResult(
         raw_query=raw_query,
@@ -62,6 +145,7 @@ def run_assistant_query(
         user_profile=user_profile,
         retrieved_evidence=retrieved_evidence,
         recommendations=recommendations,
+        self_check=self_check,
         validation=validation,
     )
 
@@ -98,6 +182,9 @@ def print_assistant_result(result: AssistantResult) -> None:
         print(f"  {index}. {song.title} by {song.artist} — Score: {score:.2f}")
         print(f"     Because: {explanation}")
 
+    if result.self_check.notes:
+        _print_lines("Self-Check", result.self_check.notes)
+
     print(f"Confidence: {result.validation.confidence_score:.2f}")
     _print_lines("Warnings", result.validation.warnings)
     _print_lines("Validation Notes", result.validation.validation_notes)
@@ -126,6 +213,7 @@ def serialize_assistant_result(result: AssistantResult) -> dict:
             }
             for song, score, explanation in result.recommendations
         ],
+        "self_check": asdict(result.self_check),
         "confidence": result.validation.confidence_score,
         "warnings": result.validation.warnings,
         "validation_notes": result.validation.validation_notes,
