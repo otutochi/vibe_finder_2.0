@@ -167,39 +167,47 @@ class Recommender:
         target += mood_offsets.get(user.favorite_mood.lower(), 0.0)
         return min(1.0, max(0.0, target))
 
+    def feature_fit_scores(self, user: UserProfile, song: Song) -> dict[str, float]:
+        return {
+            "genre": 1.0 if song.genre.lower() == user.favorite_genre.lower() else 0.0,
+            "mood": 1.0 if song.mood.lower() == user.favorite_mood.lower() else 0.0,
+            "energy": self._closeness(song.energy, user.target_energy),
+            "tempo": self._closeness(song.tempo_bpm, self._target_tempo(user), spread=120.0),
+            "valence": self._closeness(song.valence, self._target_valence(user)),
+            "danceability": self._closeness(song.danceability, self._target_danceability(user)),
+            "acousticness": self._closeness(song.acousticness, 0.80 if user.likes_acoustic else 0.20),
+        }
+
     def score_song(self, user: UserProfile, song: Song) -> Tuple[float, List[str]]:
         score = 0.0
         reasons = []
+        fit_scores = self.feature_fit_scores(user, song)
 
-        if song.genre.lower() == user.favorite_genre.lower():
+        if fit_scores["genre"] == 1.0:
             score += GENRE_MATCH_WEIGHT
             reasons.append(f"genre match (+{GENRE_MATCH_WEIGHT:.1f})")
 
-        if song.mood.lower() == user.favorite_mood.lower():
+        if fit_scores["mood"] == 1.0:
             score += MOOD_MATCH_WEIGHT
             reasons.append(f"mood match (+{MOOD_MATCH_WEIGHT:.1f})")
 
-        energy_score = self._closeness(song.energy, user.target_energy)
+        energy_score = fit_scores["energy"]
         score += energy_score
         reasons.append(f"energy closeness (+{energy_score:.2f})")
 
-        tempo_target = self._target_tempo(user)
-        tempo_score = TEMPO_WEIGHT * self._closeness(song.tempo_bpm, tempo_target, spread=120.0)
+        tempo_score = TEMPO_WEIGHT * fit_scores["tempo"]
         score += tempo_score
         reasons.append(f"tempo fit (+{tempo_score:.2f})")
 
-        valence_target = self._target_valence(user)
-        valence_score = VALENCE_WEIGHT * self._closeness(song.valence, valence_target)
+        valence_score = VALENCE_WEIGHT * fit_scores["valence"]
         score += valence_score
         reasons.append(f"valence fit (+{valence_score:.2f})")
 
-        danceability_target = self._target_danceability(user)
-        danceability_score = DANCEABILITY_WEIGHT * self._closeness(song.danceability, danceability_target)
+        danceability_score = DANCEABILITY_WEIGHT * fit_scores["danceability"]
         score += danceability_score
         reasons.append(f"danceability fit (+{danceability_score:.2f})")
 
-        acoustic_target = 0.80 if user.likes_acoustic else 0.20
-        acoustic_score = ACOUSTIC_PREFERENCE_WEIGHT * self._closeness(song.acousticness, acoustic_target)
+        acoustic_score = ACOUSTIC_PREFERENCE_WEIGHT * fit_scores["acousticness"]
         score += acoustic_score
         reasons.append(f"acoustic preference fit (+{acoustic_score:.2f})")
 
