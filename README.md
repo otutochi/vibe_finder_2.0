@@ -238,7 +238,7 @@ This project also reinforced how important it is to make uncertainty visible. Th
 
 ## Loom Walkthrough
 
-Loom video link: `ADD-LOOM-LINK-HERE`
+Loom video link: `https://www.loom.com/share/da5c0da9557148389e42d45f8e95c1ac`
 
 ## Repository Structure
 
