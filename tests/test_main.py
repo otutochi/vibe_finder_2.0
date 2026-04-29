@@ -36,6 +36,22 @@ def test_run_assistant_query_surfaces_warning_for_contradictory_request():
     assert any("contradiction" in warning.lower() for warning in result.validation.warnings)
 
 
+def test_run_assistant_query_warns_for_missing_catalog_coverage():
+    recommender, retriever, validator = build_assistant_components()
+
+    result = run_assistant_query(
+        "I want happy reggae songs",
+        recommender,
+        retriever,
+        validator,
+    )
+
+    assert result.parsed_result.preferences.favorite_genre == "reggae"
+    assert result.recommendations[0][0].genre != "reggae"
+    assert result.validation.confidence_score < 0.80
+    assert any("missing from the current catalog coverage" in warning.lower() for warning in result.validation.warnings)
+
+
 def test_append_run_log_writes_json_safe_entry(tmp_path):
     recommender, retriever, validator = build_assistant_components()
     result = run_assistant_query(

@@ -46,3 +46,14 @@ def test_high_energy_dance_request_retrieves_feature_signals():
         and ("danceability" in result.snippet.lower() or "energy" in result.snippet.lower())
         for result in results
     )
+
+
+def test_retriever_accepts_query_parse_result_input():
+    retriever = make_retriever()
+    parsed = parse_query("I want acoustic lofi songs for studying")
+
+    results = retriever.retrieve(parsed, top_k=3)
+
+    assert len(results) == 3
+    assert any(result.source_name == "genre_traits.md" for result in results)
+    assert any("study" in result.snippet.lower() or "lofi" in result.snippet.lower() for result in results)

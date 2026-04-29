@@ -45,3 +45,16 @@ def test_parse_ambiguous_request_adds_assumptions():
     assert preferences.target_energy == pytest.approx(0.55, abs=0.01)
     assert preferences.likes_acoustic is None
     assert len(result.assumptions) >= 3
+
+
+def test_parse_reggae_request_preserves_missing_coverage_genre_for_downstream_checks():
+    result = parse_query("I want happy reggae songs")
+    preferences = result.preferences
+    user_profile = preferences.to_user_profile()
+
+    assert preferences.favorite_genre == "reggae"
+    assert preferences.favorite_mood == "happy"
+    assert preferences.target_energy == pytest.approx(0.55, abs=0.01)
+    assert preferences.likes_acoustic is None
+    assert user_profile.favorite_genre == "reggae"
+    assert user_profile.likes_acoustic is False
