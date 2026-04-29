@@ -1,154 +1,246 @@
-# 🎵 Music Recommender Simulation
+# VibeFinder: Retrieval-Aware Music Recommendation Assistant
 
-## Project Summary
+## Original Project
 
-<!-- In this project you will build and explain a small music recommender system.
+This repository began as **Music Recommender Simulation**, a small content-based music recommender from an earlier CodePath AI-110 module. The original version accepted a structured user taste profile, scored songs with simple feature matching, and returned top recommendations with plain-English explanations. Its main goal was to make recommendation logic easy to inspect, test, and discuss.
 
-Your goal is to:
+## Final System Summary
 
-- Represent songs and a user "taste profile" as data
-- Design a scoring rule that turns that data into recommendations
-- Evaluate what your system gets right and wrong
-- Reflect on how this mirrors real world AI recommenders -->
+VibeFinder is now a retrieval-aware music recommendation assistant that accepts natural-language requests, parses them into structured preferences, retrieves local knowledge before ranking songs, validates the top result, and logs each run. The system is designed to be deterministic, explainable, and portfolio-friendly: every stage uses explicit heuristics, every recommendation includes reasons, and low-confidence or contradictory cases surface warnings instead of overclaiming.
 
-This project simulates a content-based music recommender. It scores every song in a small catalog against a user's taste profile and returns the top matches with human-readable explanations of why each song was chosen.
+## Why This Project Matters
 
----
+This project demonstrates how a small recommender can be extended into an applied AI system without depending on external APIs or black-box generation. It combines rule-based language parsing, local retrieval, feature-based recommendation, confidence scoring, structured logging, and automated evaluation in one end-to-end workflow.
 
-## How The System Works
+## Architecture Overview
 
-Real-world platforms like Spotify combine two main approaches: **collaborative filtering** (finding patterns across millions of users' behavior — plays, skips, saves, playlist adds) and **content-based filtering** (matching song attributes like genre, energy, and mood to a user's known preferences). Our simulation focuses on the content-based side, which is easier to explain, debug, and reason about with a small dataset.
-
-The repo also includes a small local knowledge base in `knowledge/`. These short notes on genres, moods, acousticness, listening contexts, and feature signals are meant for the upcoming retrieval layer so the system can look up supporting guidance before responding.
-
-### Song Features
-
-Each `Song` in `data/songs.csv` carries these attributes:
-
-| Feature | Type | Role in scoring |
-|---------|------|-----------------|
-| `genre` | categorical | Primary taste filter (+2.0 for match) |
-| `mood` | categorical | Secondary taste filter (+1.0 for match) |
-| `energy` | 0.0–1.0 | Closeness to user's target energy |
-| `acousticness` | 0.0–1.0 | Matches `likes_acoustic` preference |
-| `danceability` | 0.0–1.0 | Available for future scoring expansion |
-| `valence` | 0.0–1.0 | Available for future scoring expansion |
-| `tempo_bpm` | ~60–180 | Available for future scoring expansion |
-
-### User Profile
-
-A `UserProfile` stores: `favorite_genre`, `favorite_mood`, `target_energy`, and `likes_acoustic`.
-
-### Algorithm Recipe
-
-1. **Scoring Rule** — For each song, compute: `score = 2.0 × genre_match + 1.0 × mood_match + (1.0 − |song_energy − user_energy|)`. Each term also produces a reason string (e.g., "genre match (+2.0)").
-2. **Ranking Rule** — Score every song in the catalog, sort descending by score, return the top *k* results with their explanations.
-
-### Data Flow
+The current baseline recommender is class-based and lives in `src/recommender.py`. It scores songs using heuristics across genre, mood, energy, tempo, valence, danceability, and acousticness. The surrounding applied AI pipeline adds parsing, retrieval, validation, logging, and evaluation around that core ranking engine.
 
 ```mermaid
 flowchart TD
-    A["data/songs.csv"] -->|load_songs| B["Song Catalog"]
-    C["User Preferences"] --> D
-    subgraph LOOP["Score every song"]
-        B --> D["score_song"]
-        D --> E{"Genre match?"} -->|"+2.0 / +0.0"| L
-        D --> H{"Mood match?"} -->|"+1.0 / +0.0"| L
-        D --> K["1.0 − |Δenergy|"] --> L["Total score + reasons"]
-    end
-    L --> M["Collect all scores"]
-    M -->|sort descending| N["Ranked List"]
-    N -->|top k| O["Recommendations"]
+        A["Natural-language request"] --> B["Query parser"]
+        B --> C["Parsed preferences"]
+        C --> D["UserProfile"]
+        C --> E["Knowledge retriever"]
+        D --> F["Recommender"]
+        E --> G["Retrieved evidence"]
+        F --> H["Ranked recommendations"]
+        G --> I["Validator"]
+        H --> I
+        I --> J["Final response\nrecommendations + confidence + warnings"]
+        J --> K["Structured JSONL log"]
+        J --> L["Evaluation harness"]
+        M["Human review / testing"] --> I
+        M --> L
 ```
 
-### Expected Biases and Limitations
+### Main Components
 
-- **Genre dominance** — Genre match is worth +2.0, while the maximum energy closeness is only +1.0. A song in the right genre but with mismatched energy will still outscore a perfect-energy song in the wrong genre. This could create a "filter bubble" where the system only recommends one genre.
-- **No cross-taste discovery** — A user who likes "chill lofi" will never be shown an "acoustic jazz" track that might feel similar in vibe, because the system compares literal genre strings, not underlying sonic similarity.
-- **Small catalog bias** — With only 18 songs, some genres have just one representative. If that song happens to have extreme energy or mood, the system may unfairly judge the entire genre based on a single example.
-- **Binary acoustic preference** — `likes_acoustic` is a boolean, but real acoustic preference is a spectrum. A user who "somewhat" likes acoustic gets the same treatment as one who strongly prefers it.
+- `src/query_parser.py`: converts user requests into structured preferences and assumptions.
+- `src/retriever.py`: retrieves short supporting snippets from the local `knowledge/` folder.
+- `src/recommender.py`: class-based scoring and ranking engine over `Song` objects.
+- `src/validator.py`: computes confidence, warnings, and validation notes.
+- `src/main.py`: runs the full assistant pipeline from request to output.
+- `src/eval.py`: runs predefined evaluation cases and prints a pass/fail summary.
+- `knowledge/`: local retrieval corpus for genres, moods, listening contexts, acousticness, and feature signals.
+- `logs/runs.jsonl`: structured run logs for assistant outputs.
 
----
+## How It Works
 
-## Getting Started
+1. A user enters a request such as `I want acoustic lofi songs for studying`.
+2. The parser extracts fields like genre, mood, target energy, acoustic preference, and avoid constraints.
+3. The retriever looks up relevant local knowledge from short markdown notes.
+4. The recommender ranks songs using the parsed preferences and the class-based scoring heuristics.
+5. The validator assigns a confidence score and warns on contradictions, missing coverage, or weak fit.
+6. The system prints recommendations, evidence, confidence, and warnings, then writes the run to `logs/runs.jsonl`.
 
-### Setup
+## Setup
 
-1. Create a virtual environment (optional but recommended):
+### 1. Create and activate a virtual environment
 
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate      # Mac or Linux
-   .venv\Scripts\activate         # Windows
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
 
-2. Install dependencies
+### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Run the app:
+### 3. Run the assistant
 
 ```bash
 python -m src.main
 ```
 
-### CLI Output
+If you do not provide a query, the app runs a small set of predefined demo requests.
 
-![CLI verification screenshot](public/cli_verification.png)
-
-### Running Tests
-
-Run the starter tests with:
+### 4. Run the test suite
 
 ```bash
-pytest
+python -m pytest -q
 ```
 
-You can add more tests in `tests/test_recommender.py`.
+### 5. Run the evaluation harness
 
----
+```bash
+python -m src.eval
+```
 
-## Experiments You Tried
+## Sample Interactions
 
-### Diverse User Profiles
+These examples are based on the current CLI behavior.
 
-![Recommendations for core profiles](public/recommendations_for_profiles.png)
+### Example 1: Strong fit
 
-### Adversarial / Edge-Case Profiles
+Input:
 
-![Recommendations for edge cases](public/recommendations_for_edge_cases.png)
+```text
+I want acoustic lofi songs for studying
+```
 
-### Profile Comparisons
+Output highlights:
 
-- **Pop Fan vs Lofi Listener** — The pop fan's top results are upbeat, high-energy tracks like Sunrise City (0.82 energy), while the lofi listener gets mellow, low-energy picks like Library Rain (0.35 energy). This makes sense because the two profiles point in opposite directions on both genre and energy, so there is almost no overlap in their top 5.
+```text
+Parsed Preferences: {'favorite_genre': 'lofi', 'favorite_mood': 'focused', 'target_energy': 0.4, 'likes_acoustic': True, 'avoid_constraints': []}
+Top recommendation: Focus Flow by LoRoom
+Confidence: 0.99
+Warnings: None
+```
 
-- **Lofi Listener vs Intense Rock** — Both profiles match their genre cleanly, but the lofi results cluster around energy 0.35–0.42 while the rock results sit near 0.90. The mood signal reinforces this: "chill" pulls toward calm tracks and "intense" pulls toward aggressive ones. The system correctly treats these as very different vibes.
+Why it works:
 
-- **Pop Fan vs Conflicting (Ambient + High Energy)** — The pop fan gets coherent results because pop songs in the catalog naturally have moderate-to-high energy. The conflicting profile exposes a flaw: the system recommends low-energy ambient tracks despite the user wanting energy 0.95, because genre and mood bonuses outweigh the energy penalty. In a real app, this user would probably hear something like electronic or synth-pop, not a slow ambient track.
+- The query parser recognizes `lofi`, study-related focus language, low energy, and an acoustic preference.
+- The retriever surfaces lofi, studying, and feature-signal notes from the local corpus.
+- The validator reports a high-confidence match because the top result aligns strongly across genre, mood, energy, and acousticness.
 
-- **Genre Outsider (Reggae) vs Everyone Else** — Without a genre match in the catalog, this profile's scores top out around 2.0 instead of 4.0. The system still works — it falls back to mood and energy — but the results feel generic. Any profile that matches a genre in the catalog will always get more confident, higher-scoring recommendations.
+### Example 2: Strong fit with high energy
 
-### Weight Experiment
+Input:
 
-We tested halving the genre weight (2.0 → 1.0) and doubling the energy weight (1× → 2×). This made the "Extreme Low Energy Metal" edge case more reasonable — energy-appropriate songs from other genres scored closer to Iron Thunder — but it also weakened genre matching for normal profiles, making the pop fan's results feel less focused. The original weights (2.0 / 1.0 / 1×) were restored as the better default for typical users.
+```text
+Give me high-energy rock for the gym
+```
 
----
+Output highlights:
 
-## Limitations and Risks
+```text
+Parsed Preferences: {'favorite_genre': 'rock', 'favorite_mood': 'intense', 'target_energy': 0.9, 'likes_acoustic': None, 'avoid_constraints': []}
+Top recommendation: Storm Runner by Voltline
+Confidence: 0.99
+Warnings: None
+```
 
-- **Tiny catalog** — Only 18 songs across 15 genres means most genres have a single representative, giving the system no room for variety within a genre.
-- **Genre dominance** — The +2.0 genre weight overpowers mood and energy combined, creating filter bubbles where users only see one genre.
-- **No lyrics or language awareness** — The system has no idea what a song sounds like beyond numerical attributes; it cannot distinguish English from Spanish or upbeat lyrics from sad ones.
-- **Unused features** — Acousticness and danceability exist in the data but are not scored, so users who care about those dimensions get no personalization.
-- **No learning** — The system never updates based on user feedback (likes, skips, replays), so it cannot improve over time.
+Why it works:
 
+- The parser infers a rock + intense + high-energy request.
+- The retriever emphasizes feature-signal notes about tempo and energy.
+- The recommender finds a strong catalog match and the validator confirms a high-confidence result.
 
----
+### Example 3: Contradictory request
+
+Input:
+
+```text
+I want ambient songs with very high energy and acoustic feel
+```
+
+Output highlights:
+
+```text
+Top recommendation: Spacewalk Thoughts by Orbit Bloom
+Confidence: 0.36
+Warnings:
+- The request contains a likely contradiction between genre expectations and target energy.
+- Top recommendation is only a weak fit on supporting features like energy, tempo, valence, danceability, or acousticness.
+```
+
+Why it matters:
+
+- The system still returns the closest available match.
+- It does not pretend the match is strong.
+- The validator explicitly flags why the request is difficult to satisfy with the current catalog.
+
+## Design Decisions and Tradeoffs
+
+### 1. Deterministic pipeline over external LLM calls
+
+I kept the system local and deterministic so it remains easy to test, explain, and run reproducibly. That makes the project more transparent and more stable for a classroom and portfolio setting, even though it is less flexible than a model-backed assistant.
+
+### 2. Class-based recommendation engine
+
+The recommendation logic is centralized in `Recommender`, which avoids splitting behavior across multiple parallel APIs. This reduces drift and makes it easier to test and extend the scoring logic in one place.
+
+### 3. Retrieval from local knowledge instead of web sources
+
+The retriever reads short markdown notes from `knowledge/` rather than calling outside systems. That keeps the evidence explainable and lets the retrieval layer change the assistant's behavior without adding network dependencies.
+
+### 4. Confidence and warnings instead of overclaiming
+
+The validator lowers confidence when the catalog lacks genre coverage, when a request is contradictory, or when the top match is weak on supporting features. This choice favors honesty and guardrails over forcing a confident answer in every case.
+
+## Testing Summary
+
+The project includes unit and integration coverage for parsing, retrieval, recommendation, validation, logging, evaluation, and the end-to-end assistant pipeline.
+
+Current validation commands:
+
+```bash
+python -m pytest -q
+python -m src.main
+python -m src.eval
+```
+
+Current results:
+
+- `python -m pytest -q`: 24 tests passing.
+- `python -m src.eval`: 9 out of 9 evaluation cases passing.
+- Average confidence across evaluation prompts: `0.80`.
+- Common warning types observed in evaluation:
+    - missing catalog coverage
+    - contradictory genre/energy request
+    - weak supporting-feature fit
+
+## Guardrails and Reliability
+
+- The assistant logs each run to `logs/runs.jsonl`.
+- It returns structured warnings when a request is contradictory or weakly supported by the catalog.
+- It uses confidence scoring instead of implying every recommendation is equally trustworthy.
+- It keeps the retrieval corpus local and inspectable.
+
+## Limitations
+
+- The catalog is still very small, so some genres have only one representative track.
+- Retrieval uses simple token overlap rather than deeper semantic search.
+- The parser is rule-based, which keeps it transparent but also limits its language flexibility.
+- Confidence is heuristic, not learned from real user feedback.
+- The system recommends songs from a fixed local dataset rather than a live music library.
 
 ## Reflection
 
-My biggest learning moment was discovering how much power a single weight carries. Setting genre to +2.0 seemed harmless, but it effectively guaranteed that genre would dominate every recommendation — even when energy or mood would have been a better signal. That one number created a filter bubble, and I only noticed it when I tested adversarial profiles that deliberately conflicted (like wanting high energy and ambient at the same time). It made me realize that real platforms are making thousands of these small weight decisions, and each one shapes what users see without them knowing.
+The most useful lesson from this project was that “AI system” does not have to mean an opaque model call. A relatively small recommender became much more credible once it could interpret natural language, retrieve supporting local evidence, validate its own result, and surface confidence and warnings. The largest design challenge was keeping those pieces integrated without duplicating logic or creating one-off scoring paths just for testing or evaluation.
 
-Using AI tools sped up the mechanical parts — generating CSV rows, scaffolding functions, and formatting output. But I had to double-check the scoring math by hand. When I asked for a "closeness" formula, I needed to verify it actually rewarded proximity (1.0 − |Δ|) instead of just rewarding higher values. The AI also suggested weights I wouldn't have chosen, so I learned to treat its output as a starting draft, not a final answer. The most surprising thing was how three simple rules (genre match, mood match, energy closeness) already produce results that "feel" like real recommendations for typical users — it only breaks down at the edges. If I extended this project, I would wire up acousticness and danceability scoring, add a diversity penalty so the top 5 aren't all from the same genre, and try a much larger song catalog to see if the system scales.
+This project also reinforced how important it is to make uncertainty visible. The strongest demo moments are not the easy wins like `lofi for studying`; they are the low-confidence cases where the system explains why the catalog or the request makes the answer less trustworthy.
+
+## Loom Walkthrough
+
+Loom video link: `ADD-LOOM-LINK-HERE`
+
+## Repository Structure
+
+```text
+src/
+    main.py
+    query_parser.py
+    recommender.py
+    retriever.py
+    validator.py
+    eval.py
+knowledge/
+logs/
+data/
+tests/
+```
 
