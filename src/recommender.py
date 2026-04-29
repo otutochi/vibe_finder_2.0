@@ -1,5 +1,13 @@
-from typing import List, Dict, Tuple
-from dataclasses import asdict, dataclass
+from typing import List, Tuple
+from dataclasses import dataclass
+
+
+GENRE_MATCH_WEIGHT = 2.0
+MOOD_MATCH_WEIGHT = 1.0
+TEMPO_WEIGHT = 0.35
+VALENCE_WEIGHT = 0.30
+DANCEABILITY_WEIGHT = 0.25
+ACOUSTIC_PREFERENCE_WEIGHT = 0.30
 
 @dataclass
 class Song:
@@ -37,101 +45,206 @@ class Recommender:
     def __init__(self, songs: List[Song]):
         self.songs = songs
 
+    def _closeness(self, value: float, target: float, spread: float = 1.0) -> float:
+        return max(0.0, 1.0 - abs(value - target) / spread)
+
+    def _target_tempo(self, user: UserProfile) -> float:
+        base_tempo = 60.0 + (user.target_energy * 80.0)
+        mood_offsets = {
+            "happy": 6.0,
+            "chill": -8.0,
+            "focused": -4.0,
+            "intense": 12.0,
+            "aggressive": 16.0,
+            "relaxed": -12.0,
+            "euphoric": 10.0,
+            "moody": -4.0,
+            "nostalgic": -2.0,
+            "melancholic": -6.0,
+            "dreamy": -10.0,
+            "uplifting": 8.0,
+            "groovy": 6.0,
+            "romantic": -3.0,
+        }
+        genre_offsets = {
+            "pop": 4.0,
+            "lofi": -4.0,
+            "rock": 8.0,
+            "ambient": -12.0,
+            "jazz": -2.0,
+            "synthwave": 4.0,
+            "indie pop": 2.0,
+            "r&b": -2.0,
+            "electronic": 10.0,
+            "hip hop": 2.0,
+            "classical": -10.0,
+            "metal": 12.0,
+            "funk": 6.0,
+            "country": 0.0,
+            "latin": 4.0,
+        }
+        target = base_tempo
+        target += mood_offsets.get(user.favorite_mood.lower(), 0.0)
+        target += genre_offsets.get(user.favorite_genre.lower(), 0.0)
+        return min(180.0, max(60.0, target))
+
+    def _target_valence(self, user: UserProfile) -> float:
+        base_valence = 0.25 + (user.target_energy * 0.5)
+        mood_targets = {
+            "happy": 0.85,
+            "chill": 0.58,
+            "focused": 0.52,
+            "intense": 0.45,
+            "aggressive": 0.22,
+            "relaxed": 0.68,
+            "euphoric": 0.82,
+            "moody": 0.40,
+            "nostalgic": 0.62,
+            "melancholic": 0.30,
+            "dreamy": 0.56,
+            "uplifting": 0.78,
+            "groovy": 0.88,
+            "romantic": 0.75,
+        }
+        genre_offsets = {
+            "pop": 0.05,
+            "lofi": 0.02,
+            "rock": -0.05,
+            "ambient": -0.05,
+            "jazz": 0.02,
+            "synthwave": -0.02,
+            "indie pop": 0.04,
+            "r&b": 0.04,
+            "electronic": 0.03,
+            "hip hop": -0.05,
+            "classical": -0.02,
+            "metal": -0.10,
+            "funk": 0.05,
+            "country": 0.04,
+            "latin": 0.05,
+        }
+        target = mood_targets.get(user.favorite_mood.lower(), base_valence)
+        target += genre_offsets.get(user.favorite_genre.lower(), 0.0)
+        return min(1.0, max(0.0, target))
+
+    def _target_danceability(self, user: UserProfile) -> float:
+        base_danceability = 0.35 + (user.target_energy * 0.45)
+        genre_targets = {
+            "pop": 0.82,
+            "lofi": 0.55,
+            "rock": 0.62,
+            "ambient": 0.35,
+            "jazz": 0.52,
+            "synthwave": 0.72,
+            "indie pop": 0.76,
+            "r&b": 0.74,
+            "electronic": 0.89,
+            "hip hop": 0.80,
+            "classical": 0.25,
+            "metal": 0.48,
+            "funk": 0.92,
+            "country": 0.62,
+            "latin": 0.85,
+        }
+        mood_offsets = {
+            "happy": 0.04,
+            "chill": -0.03,
+            "focused": -0.04,
+            "intense": 0.02,
+            "aggressive": -0.04,
+            "relaxed": -0.05,
+            "euphoric": 0.05,
+            "moody": -0.03,
+            "nostalgic": -0.02,
+            "melancholic": -0.06,
+            "dreamy": -0.08,
+            "uplifting": 0.03,
+            "groovy": 0.06,
+            "romantic": 0.02,
+        }
+        genre_target = genre_targets.get(user.favorite_genre.lower(), base_danceability)
+        target = (base_danceability + genre_target) / 2.0
+        target += mood_offsets.get(user.favorite_mood.lower(), 0.0)
+        return min(1.0, max(0.0, target))
+
     def score_song(self, user: UserProfile, song: Song) -> Tuple[float, List[str]]:
         score = 0.0
         reasons = []
 
         if song.genre.lower() == user.favorite_genre.lower():
-            score += 2.0
-            reasons.append("genre match (+2.0)")
+            score += GENRE_MATCH_WEIGHT
+            reasons.append(f"genre match (+{GENRE_MATCH_WEIGHT:.1f})")
 
         if song.mood.lower() == user.favorite_mood.lower():
-            score += 1.0
-            reasons.append("mood match (+1.0)")
+            score += MOOD_MATCH_WEIGHT
+            reasons.append(f"mood match (+{MOOD_MATCH_WEIGHT:.1f})")
 
-        energy_score = 1.0 - abs(song.energy - user.target_energy)
+        energy_score = self._closeness(song.energy, user.target_energy)
         score += energy_score
         reasons.append(f"energy closeness (+{energy_score:.2f})")
 
+        tempo_target = self._target_tempo(user)
+        tempo_score = TEMPO_WEIGHT * self._closeness(song.tempo_bpm, tempo_target, spread=120.0)
+        score += tempo_score
+        reasons.append(f"tempo fit (+{tempo_score:.2f})")
+
+        valence_target = self._target_valence(user)
+        valence_score = VALENCE_WEIGHT * self._closeness(song.valence, valence_target)
+        score += valence_score
+        reasons.append(f"valence fit (+{valence_score:.2f})")
+
+        danceability_target = self._target_danceability(user)
+        danceability_score = DANCEABILITY_WEIGHT * self._closeness(song.danceability, danceability_target)
+        score += danceability_score
+        reasons.append(f"danceability fit (+{danceability_score:.2f})")
+
+        acoustic_target = 0.80 if user.likes_acoustic else 0.20
+        acoustic_score = ACOUSTIC_PREFERENCE_WEIGHT * self._closeness(song.acousticness, acoustic_target)
+        score += acoustic_score
+        reasons.append(f"acoustic preference fit (+{acoustic_score:.2f})")
+
         return (score, reasons)
 
-    def recommend_with_details(self, user: UserProfile, k: int = 5) -> List[Tuple[Song, float, str]]:
+    def recommend(self, user: UserProfile, k: int = 5) -> List[Tuple[Song, float, str]]:
         scored = []
         for song in self.songs:
             score, reasons = self.score_song(user, song)
             explanation = "; ".join(reasons) if reasons else "no matching features"
             scored.append((song, score, explanation))
 
-        scored.sort(key=lambda item: item[1], reverse=True)
+        scored.sort(key=lambda item: (-item[1], item[0].title))
         return scored[:k]
-
-    def recommend(self, user: UserProfile, k: int = 5) -> List[Song]:
-        recommendations = self.recommend_with_details(user, k=k)
-        return [song for song, _, _ in recommendations]
 
     def explain_recommendation(self, user: UserProfile, song: Song) -> str:
         _, reasons = self.score_song(user, song)
         return "; ".join(reasons) if reasons else "no matching features"
 
 
-def _dict_to_user_profile(user_prefs: Dict) -> UserProfile:
-    return UserProfile(
-        favorite_genre=user_prefs.get("genre", ""),
-        favorite_mood=user_prefs.get("mood", ""),
-        target_energy=float(user_prefs.get("energy", 0.0)),
-        likes_acoustic=bool(user_prefs.get("likes_acoustic", False)),
-    )
-
-
-def _dict_to_song(song: Dict) -> Song:
-    return Song(
-        id=int(song.get("id", 0)),
-        title=song.get("title", ""),
-        artist=song.get("artist", ""),
-        genre=song.get("genre", ""),
-        mood=song.get("mood", ""),
-        energy=float(song.get("energy", 0.0)),
-        tempo_bpm=float(song.get("tempo_bpm", 0.0)),
-        valence=float(song.get("valence", 0.0)),
-        danceability=float(song.get("danceability", 0.0)),
-        acousticness=float(song.get("acousticness", 0.0)),
-    )
-
-def load_songs(csv_path: str) -> List[Dict]:
+def load_songs(csv_path: str) -> List[Song]:
     """
-    Loads songs from a CSV file.
+    Loads songs from a CSV file into Song objects.
     Required by src/main.py
     """
     import csv
 
-    numeric_fields = {"id", "energy", "tempo_bpm", "valence", "danceability", "acousticness"}
     songs = []
 
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            for field in numeric_fields:
-                if field in row:
-                    row[field] = int(row[field]) if field == "id" else float(row[field])
-            songs.append(row)
+            songs.append(
+                Song(
+                    id=int(row["id"]),
+                    title=row["title"],
+                    artist=row["artist"],
+                    genre=row["genre"],
+                    mood=row["mood"],
+                    energy=float(row["energy"]),
+                    tempo_bpm=float(row["tempo_bpm"]),
+                    valence=float(row["valence"]),
+                    danceability=float(row["danceability"]),
+                    acousticness=float(row["acousticness"]),
+                )
+            )
 
     return songs
-
-def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
-    """
-    Scores a single song against user preferences.
-    Required by recommend_songs() and src/main.py
-    """
-    recommender = Recommender([_dict_to_song(song)])
-    user = _dict_to_user_profile(user_prefs)
-    return recommender.score_song(user, recommender.songs[0])
-
-def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Tuple[Dict, float, str]]:
-    """
-    Functional implementation of the recommendation logic.
-    Required by src/main.py
-    """
-    user = _dict_to_user_profile(user_prefs)
-    recommender = Recommender([_dict_to_song(song) for song in songs])
-    recommendations = recommender.recommend_with_details(user, k=k)
-    return [(asdict(song), score, explanation) for song, score, explanation in recommendations]

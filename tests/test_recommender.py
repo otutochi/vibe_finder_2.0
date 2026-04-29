@@ -1,8 +1,6 @@
-from dataclasses import asdict
-
 import pytest
 
-from src.recommender import Recommender, Song, UserProfile, recommend_songs
+from src.recommender import Recommender, Song, UserProfile
 
 def make_small_recommender() -> Recommender:
     songs = [
@@ -45,17 +43,53 @@ def test_score_song_returns_expected_score_breakdown():
     pop_score, pop_reasons = rec.score_song(user, rec.songs[0])
     lofi_score, lofi_reasons = rec.score_song(user, rec.songs[1])
 
-    assert pop_score == pytest.approx(4.0)
+    assert pop_score == pytest.approx(5.16, abs=0.01)
     assert pop_reasons == [
         "genre match (+2.0)",
         "mood match (+1.0)",
         "energy closeness (+1.00)",
+        "tempo fit (+0.31)",
+        "valence fit (+0.30)",
+        "danceability fit (+0.25)",
+        "acoustic preference fit (+0.30)",
     ]
-    assert lofi_score == pytest.approx(0.6)
-    assert lofi_reasons == ["energy closeness (+0.60)"]
+    assert lofi_score == pytest.approx(1.27, abs=0.01)
+    assert lofi_reasons == [
+        "energy closeness (+0.60)",
+        "tempo fit (+0.19)",
+        "valence fit (+0.21)",
+        "danceability fit (+0.17)",
+        "acoustic preference fit (+0.09)",
+    ]
 
 
-def test_recommend_sorts_by_score_even_when_best_song_is_not_first():
+def test_likes_acoustic_changes_scores_in_expected_direction():
+    acoustic_song = make_small_recommender().songs[1]
+    likes_acoustic_user = UserProfile(
+        favorite_genre="",
+        favorite_mood="",
+        target_energy=0.4,
+        likes_acoustic=True,
+    )
+    avoids_acoustic_user = UserProfile(
+        favorite_genre="",
+        favorite_mood="",
+        target_energy=0.4,
+        likes_acoustic=False,
+    )
+    rec = make_small_recommender()
+
+    likes_score, likes_reasons = rec.score_song(likes_acoustic_user, acoustic_song)
+    avoids_score, avoids_reasons = rec.score_song(avoids_acoustic_user, acoustic_song)
+
+    assert likes_score == pytest.approx(2.08, abs=0.01)
+    assert avoids_score == pytest.approx(1.90, abs=0.01)
+    assert likes_score > avoids_score
+    assert likes_reasons[-1] == "acoustic preference fit (+0.27)"
+    assert avoids_reasons[-1] == "acoustic preference fit (+0.09)"
+
+
+def test_recommend_returns_ranked_results_with_explanations():
     user = UserProfile(
         favorite_genre="lofi",
         favorite_mood="chill",
@@ -65,7 +99,10 @@ def test_recommend_sorts_by_score_even_when_best_song_is_not_first():
     rec = make_small_recommender()
     results = rec.recommend(user, k=2)
 
-    assert [song.title for song in results] == ["Chill Lofi Loop", "Test Pop Track"]
+    assert [song.title for song, _, _ in results] == ["Chill Lofi Loop", "Test Pop Track"]
+    assert results[0][1] > results[1][1]
+    assert "tempo fit" in results[0][2]
+    assert "danceability fit" in results[0][2]
 
 
 def test_explain_recommendation_returns_full_breakdown():
@@ -80,34 +117,40 @@ def test_explain_recommendation_returns_full_breakdown():
 
     explanation = rec.explain_recommendation(user, song)
     assert isinstance(explanation, str)
-    assert explanation == "genre match (+2.0); mood match (+1.0); energy closeness (+1.00)"
+    assert explanation == (
+        "genre match (+2.0); mood match (+1.0); energy closeness (+1.00); tempo fit (+0.31); "
+        "valence fit (+0.30); danceability fit (+0.25); acoustic preference fit (+0.30)"
+    )
 
 
-def test_functional_and_oop_recommendations_match():
+def test_higher_energy_profile_prefers_faster_more_danceable_song():
     user = UserProfile(
         favorite_genre="pop",
         favorite_mood="happy",
-        target_energy=0.8,
+        target_energy=0.9,
         likes_acoustic=False,
     )
-    user_prefs = {
-        "genre": user.favorite_genre,
-        "mood": user.favorite_mood,
-        "energy": user.target_energy,
-        "likes_acoustic": user.likes_acoustic,
-    }
     rec = make_small_recommender()
-    songs = [asdict(song) for song in rec.songs]
+    top_song, top_score, explanation = rec.recommend(user, k=1)[0]
 
-    oop_results = rec.recommend_with_details(user, k=2)
-    functional_results = recommend_songs(user_prefs, songs, k=2)
+    assert top_song.title == "Test Pop Track"
+    assert top_score == pytest.approx(5.03, abs=0.01)
+    assert "tempo fit" in explanation
+    assert "valence fit" in explanation
 
-    assert len(oop_results) == len(functional_results) == 2
 
-    for (oop_song, oop_score, oop_explanation), (func_song, func_score, func_explanation) in zip(
-        oop_results,
-        functional_results,
-    ):
-        assert oop_song.title == func_song["title"]
-        assert oop_score == pytest.approx(func_score)
-        assert oop_explanation == func_explanation
+def test_load_songs_returns_song_objects(tmp_path):
+    csv_path = tmp_path / "songs.csv"
+    csv_path.write_text(
+        "id,title,artist,genre,mood,energy,tempo_bpm,valence,danceability,acousticness\n"
+        "1,Sample Song,Sample Artist,pop,happy,0.8,120,0.9,0.8,0.2\n",
+        encoding="utf-8",
+    )
+
+    from src.recommender import load_songs
+
+    songs = load_songs(str(csv_path))
+
+    assert len(songs) == 1
+    assert isinstance(songs[0], Song)
+    assert songs[0].tempo_bpm == pytest.approx(120.0)
