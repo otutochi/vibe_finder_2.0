@@ -14,24 +14,36 @@ This project demonstrates how a small recommender can be extended into an applie
 
 ## Architecture Overview
 
-The current baseline recommender is class-based and lives in `src/recommender.py`. It scores songs using heuristics across genre, mood, energy, tempo, valence, danceability, and acousticness. The surrounding applied AI pipeline adds parsing, retrieval, validation, logging, and evaluation around that core ranking engine.
+The runtime path starts with a natural-language request, turns it into a normalized `UserProfile`, retrieves supporting notes from the local knowledge base, ranks songs with the class-based recommender, and then validates the result before returning recommendations, evidence, confidence, and warnings. Logging captures each run in JSONL, and the same pipeline is exercised by the evaluation harness, automated tests, and manual review so you can check behavior before exporting the diagram or presenting the system.
 
 ```mermaid
-flowchart TD
-        A["Natural-language request"] --> B["Query parser"]
-        B --> C["Parsed preferences"]
-        C --> D["UserProfile"]
-        C --> E["Knowledge retriever"]
-        D --> F["Recommender"]
-        E --> G["Retrieved evidence"]
-        F --> H["Ranked recommendations"]
-        G --> I["Validator"]
-        H --> I
-        I --> J["Final response\nrecommendations + confidence + warnings"]
-        J --> K["Structured JSONL log"]
-        J --> L["Evaluation harness"]
-        M["Human review / testing"] --> I
-        M --> L
+flowchart LR
+    subgraph Runtime["Request-Time Assistant Pipeline"]
+        A["User request"] --> B["Query parser\nsrc/query_parser.py"]
+        B --> C["Preference normalization\nParsedPreferences -> UserProfile"]
+        B --> D["Retriever\nsrc/retriever.py\nknowledge/*.md"]
+        C --> E["Class-based recommender\nsrc/recommender.py\nSong + UserProfile"]
+        D --> F["Retrieved evidence"]
+        E --> G["Ranked songs + explanations"]
+        F --> H["Validator\nsrc/validator.py"]
+        G --> H
+        H --> I["Final output\nrecommendations + evidence + confidence + warnings"]
+        I --> J["Structured logging\nlogs/runs.jsonl"]
+    end
+
+    subgraph Quality["Evaluation and Review Loop"]
+        K["Evaluation\nsrc/eval.py"]
+        L["Human review / testing\npytest + manual CLI runs"]
+    end
+
+    K -. "runs predefined prompts through the same pipeline" .-> B
+    I --> K
+    J --> K
+    K --> L
+    L -. "refines parser, retriever, recommender, and validator" .-> B
+    L -.-> D
+    L -.-> E
+    L -.-> H
 ```
 
 ### Main Components
