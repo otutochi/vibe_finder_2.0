@@ -9,8 +9,10 @@ You will implement the functions in recommender.py:
 - recommend_songs
 """
 
+from pathlib import Path
 from typing import Dict, List
-from recommender import load_songs, recommend_songs
+
+from .recommender import load_songs, recommend_songs
 
 
 def print_recommendations(label: str, user_prefs: Dict, songs: List[Dict], k: int = 5) -> None:
@@ -28,7 +30,8 @@ def print_recommendations(label: str, user_prefs: Dict, songs: List[Dict], k: in
 
 
 def main() -> None:
-    songs = load_songs("../data/songs.csv")
+    csv_path = Path(__file__).resolve().parents[1] / "data" / "songs.csv"
+    songs = load_songs(str(csv_path))
     print(f"Loaded {len(songs)} songs.\n")
 
     # --- Core profiles ---
