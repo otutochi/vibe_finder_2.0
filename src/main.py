@@ -1,8 +1,10 @@
 """Command line runner for the retrieval-aware music recommendation assistant."""
 
 from dataclasses import asdict, dataclass
+import json
 from pathlib import Path
 import sys
+from datetime import datetime, timezone
 from typing import Iterable, List, Tuple
 
 from .query_parser import QueryParseResult, parse_query
@@ -28,8 +30,12 @@ class AssistantResult:
     validation: ValidationResult
 
 
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
 def build_assistant_components() -> Tuple[Recommender, KnowledgeRetriever, RecommendationValidator]:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = _repo_root()
     songs = load_songs(str(repo_root / "data" / "songs.csv"))
     recommender = Recommender(songs)
     retriever = KnowledgeRetriever(repo_root / "knowledge")
@@ -97,6 +103,48 @@ def print_assistant_result(result: AssistantResult) -> None:
     _print_lines("Validation Notes", result.validation.validation_notes)
 
 
+def serialize_assistant_result(result: AssistantResult) -> dict:
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "raw_query": result.raw_query,
+        "parsed_preferences": asdict(result.parsed_result.preferences),
+        "assumptions": result.parsed_result.assumptions,
+        "user_profile": asdict(result.user_profile),
+        "retrieved_evidence": [
+            {
+                "source_name": snippet.source_name,
+                "snippet": snippet.snippet,
+                "relevance_score": snippet.relevance_score,
+            }
+            for snippet in result.retrieved_evidence
+        ],
+        "top_recommendations": [
+            {
+                "song": asdict(song),
+                "score": score,
+                "explanation": explanation,
+            }
+            for song, score, explanation in result.recommendations
+        ],
+        "confidence": result.validation.confidence_score,
+        "warnings": result.validation.warnings,
+        "validation_notes": result.validation.validation_notes,
+    }
+
+
+def append_run_log(result: AssistantResult, log_path: Path | None = None) -> bool:
+    target_path = log_path or (_repo_root() / "logs" / "runs.jsonl")
+
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with target_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(serialize_assistant_result(result), ensure_ascii=True) + "\n")
+    except OSError:
+        return False
+
+    return True
+
+
 def _resolve_queries(argv: List[str]) -> List[str]:
     if argv:
         return [" ".join(argv).strip()]
@@ -113,6 +161,7 @@ def main() -> None:
 
     for query in queries:
         result = run_assistant_query(query, recommender, retriever, validator)
+        append_run_log(result)
         print_assistant_result(result)
 
 
