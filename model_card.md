@@ -1,79 +1,120 @@
-# 🎧 Model Card: Music Recommender Simulation
+# Model Card: VibeFinder Retrieval-Aware Music Recommendation Assistant
 
-## 1. Model Name  
+## Model Name
 
-**VibeFinder 1.0**
+**VibeFinder 2.0**
 
----
+## Intended Use
 
-## 2. Intended Use  
+VibeFinder is a classroom and portfolio project that recommends songs from a small local catalog based on a natural-language request. It is intended to demonstrate an applied AI workflow that combines rule-based parsing, local retrieval, class-based recommendation, validation, logging, and evaluation.
 
-This system suggests 5 songs from a small catalog based on a user's preferred genre, mood, and energy level. It assumes the user knows what genre and mood they are in the mood for and can express a target energy level on a 0-to-1 scale. It is built for classroom exploration only — it is not designed for real users, production deployment, or commercial use.
+It is appropriate for:
 
----
+- exploring interpretable recommendation logic
+- demonstrating retrieval-augmented workflows without external APIs
+- showing confidence scoring and guardrails on a small dataset
 
-## 3. How the Model Works  
+It is not appropriate for:
 
-The system looks at three things about each song: its genre, its mood, and its energy level. It compares those to the user's preferences and gives the song a score.
+- production music recommendation
+- large-scale personalization
+- safety-critical decision making
+- real-world claims about user taste, mood, or psychological state
 
-A song gets the most points (+2) for being in the user's favorite genre. It gets a smaller bonus (+1) for matching the user's preferred mood. Then it gets up to 1 extra point based on how close the song's energy is to what the user wants — the closer, the better. A song that matches on all three can score up to 4 points. The system scores every song in the catalog this way, sorts them from highest to lowest, and shows the top 5.
+## System Components
 
-Every recommendation also comes with a plain-English explanation of why it scored the way it did, like "genre match (+2.0); mood match (+1.0); energy closeness (+0.97)."
+The current recommendation baseline is class-based and centered in `src/recommender.py`.
 
----
+- `UserProfile`: structured user input with `favorite_genre`, `favorite_mood`, `target_energy`, and `likes_acoustic`
+- `Recommender`: canonical recommendation engine over `Song` objects
+- `Query Parser`: rule-based natural-language parser that extracts structured preferences and assumptions
+- `Retriever`: local snippet retriever over markdown files in `knowledge/`
+- `Validator`: confidence scoring, warnings, and validation notes
+- `Logger`: JSONL run logging to `logs/runs.jsonl`
+- `Evaluation Harness`: predefined end-to-end cases in `src/eval.py`
 
-## 4. Data  
+The recommender uses richer heuristics than the original version. Instead of relying only on genre, mood, and energy, it also models tempo, valence, danceability, and acousticness as supporting feature matches tied to the requested genre, mood, and target energy.
 
-The catalog contains 18 songs stored in a CSV file. We started with 10 songs and added 8 more to improve genre and mood diversity. The dataset now covers 15 genres (pop, lofi, rock, ambient, jazz, synthwave, indie pop, r&b, electronic, hip hop, classical, metal, funk, country, latin) and 14 moods (happy, chill, intense, relaxed, moody, focused, nostalgic, euphoric, melancholic, dreamy, aggressive, groovy, uplifting, romantic).
+## How the System Works
 
-Most genres have only one song. Pop and lofi have the most representation (2–3 songs each). The data does not include any songs in languages other than English, and there are no lyrics, popularity scores, or release dates. The musical taste reflected in the catalog skews toward modern, Western, English-language music.
+1. The user enters a request such as `I want acoustic lofi songs for studying`.
+2. The parser extracts structured preferences and any assumptions.
+3. The retriever looks up relevant local knowledge about genres, moods, listening contexts, acousticness, and feature signals.
+4. The recommender ranks songs using class-based scoring over `Song` objects.
+5. The validator computes a confidence score, warnings, and validation notes.
+6. The assistant prints recommendations and logs the run as structured JSON.
 
----
+Every recommendation remains explainable because the ranking step returns human-readable scoring reasons.
 
-## 5. Strengths  
+## Strengths
 
-The system works well for users whose preferences align naturally with the catalog — a "happy pop" fan or a "chill lofi" listener gets results that feel intuitive and correct. It correctly separates two pop songs (Sunrise City vs Gym Hero) based on mood and energy differences, which shows the scoring logic can make meaningful distinctions within a genre. The explanation strings make every recommendation transparent — you can see exactly why a song ranked where it did, which is something most real apps do not offer. The simplicity of the scoring rule also makes it easy to experiment with weights and immediately understand the impact.
+- **Transparent recommendations**: every top result includes an explanation string rather than a hidden score.
+- **Deterministic behavior**: the parser, retriever, recommender, validator, and evaluation harness all run locally and reproducibly.
+- **Richer feature matching**: tempo, valence, danceability, and acousticness now influence ranking in addition to genre, mood, and energy.
+- **Guardrails for weak cases**: contradictory or weak-fit requests lower confidence and trigger warnings instead of receiving a falsely confident answer.
+- **Integrated applied AI workflow**: retrieval and validation are part of the core application logic, not side scripts.
 
----
+## Limitations and Biases
 
-## 6. Limitations and Bias 
+- **Small catalog bias**: the dataset contains only 18 songs, so many genres have only one representative. This makes it hard to support variety or nuanced within-genre matching.
+- **Western and English-language skew**: the catalog reflects a narrow slice of music styles and omits lyrics, language diversity, release era, and cultural context.
+- **Rule-based parser limits**: natural-language understanding is deterministic but shallow. Requests outside the supported vocabulary may be oversimplified or partially misread.
+- **Heuristic confidence**: confidence is based on explicit rules and fit checks, not learned calibration from user feedback.
+- **Literal retrieval**: the retriever uses token overlap and keyword normalization rather than deeper semantic search.
+- **No personalization loop**: the system does not learn from likes, skips, or long-term listening history.
 
-The system over-prioritizes genre because the genre match weight (+2.0) is larger than mood (+1.0) and energy closeness (max +1.0) combined, which means a song in the "right" genre will almost always outrank a better-fitting song in a different genre — creating a filter bubble where users only ever see one genre in their results. Most genres in the catalog (13 out of 15) have only a single song, so users who prefer funk, jazz, or classical have no real variety — the system has only one option to recommend regardless of their mood or energy preferences. Additionally, the scoring logic ignores acousticness and danceability entirely even though those features exist in the dataset and the user profile includes a `likes_acoustic` field, leaving acoustic-leaning and dance-focused users with no personalization on those dimensions. Finally, the energy closeness formula treats "too high" and "too low" the same way, so it cannot distinguish a user who wants "at least this much energy" from one who wants "exactly this energy level."
+These limitations mean the assistant is best understood as an explainable prototype, not a production recommender.
 
----
+## Evaluation Results
 
-## 7. Evaluation  
+The project includes both automated tests and an evaluation harness.
 
-We tested six user profiles — three "normal" profiles and three adversarial edge cases — and compared the top 5 results for each.
+Current verified results:
 
-**Profiles tested:**
+- `python -m pytest -q`: 24 passing tests
+- `python -m src.eval`: 9 out of 9 predefined evaluation cases passing
+- average confidence across evaluation cases: `0.80`
 
-- **High-Energy Pop Fan** (pop, happy, energy 0.85) — Sunrise City ranked first with a near-perfect score of 3.97. Gym Hero also appeared but ranked lower because its mood is "intense," not "happy." This makes sense: the system correctly separated two pop songs by mood and energy, which is exactly what the scoring rule is designed to do.
+Evaluation coverage includes:
 
-- **Chill Lofi Listener** (lofi, chill, energy 0.35) — Library Rain scored a perfect 4.0 because it matches on genre, mood, and energy exactly. Midnight Coding came in second at 3.93, losing only 0.07 points from a slight energy gap. Both results feel right — these are the two most relaxing, low-key tracks in the catalog.
+- strong-fit requests such as acoustic lofi for studying and high-energy rock for the gym
+- missing-coverage requests such as happy reggae songs
+- contradictory requests such as ambient songs with very high energy and an acoustic feel
 
-- **Deep Intense Rock** (rock, intense, energy 0.90) — Storm Runner was the clear winner at 3.99. Since it is the only rock song, the remaining four recommendations were non-rock songs sorted by mood and energy similarity. This exposed how the system falls back to weaker signals when the genre pool is thin.
+Common warning types observed in evaluation:
 
-**Surprising findings from edge cases:**
+- requested genre missing from catalog coverage
+- contradiction between genre expectations and target energy
+- weak supporting-feature fit on energy, tempo, valence, danceability, or acousticness
 
-- **Conflicting preferences** (ambient, chill, energy 0.95) — The system recommended Spacewalk Thoughts (ambient, chill, energy 0.28) as #1 even though the user wanted high energy. Genre and mood matches (+3.0) completely overwhelmed the terrible energy fit (+0.33). This was the clearest example of genre dominance overriding a numerical preference.
+## Misuse Risks and Guardrails
 
-- **Genre Outsider** (reggae, happy, energy 0.60) — No song in the catalog matched on genre, so the maximum possible score dropped to about 2.0. The system still produced reasonable results sorted by mood and energy, but every recommendation felt like a compromise rather than a confident pick.
+Potential misuse risks:
 
-- **Extreme Low Energy Metal** (metal, aggressive, energy 0.10) — Iron Thunder ranked first despite having energy 0.96 versus the user's target of 0.10. The genre and mood bonuses (+3.0) made the energy mismatch nearly irrelevant. This confirmed that the current weights make it almost impossible for energy to override a categorical match.
+- treating the system like a universal or authoritative taste model
+- assuming a recommendation is strong even when the catalog lacks coverage
+- using mood labels as if they were psychological or emotional diagnoses
 
----
+Current guardrails:
 
-## 8. Future Work  
+- contradictory or weak-fit cases reduce confidence and emit warnings
+- missing genre coverage is surfaced explicitly
+- retrieval stays local and inspectable
+- each run is logged with parsed preferences, evidence, recommendations, confidence, and warnings
+- the assistant does not claim to infer personal identity, mental health, or sensitive traits
 
-- **Use acousticness and danceability in scoring.** These features already exist in the dataset and the user profile has a `likes_acoustic` field, but the scoring function ignores them. Adding even a small weight for these would help differentiate users who want acoustic coffee-shop vibes from those who want electronic dance tracks.
-- **Add a diversity penalty.** Right now, if a user likes pop, all top results could be pop songs. A penalty that reduces a song's score when the same genre or artist is already in the top results would create a more varied and interesting recommendation list.
-- **Expand the catalog and add collaborative signals.** With only 18 songs, the system cannot meaningfully serve most genres. A larger dataset plus even simple collaborative filtering ("users who liked this also liked that") would reduce the cold-start problem for niche tastes.
+## Helpful AI Suggestion
 
----
+One helpful AI suggestion during the build was to turn the original simple recommender into a retrieval-aware assistant rather than trying to bolt on a generic chatbot. That suggestion led to a cleaner architecture: query parser, retriever, recommender, validator, logging, and evaluation around a single class-based ranking engine.
 
-## 9. Personal Reflection  
+## Flawed AI Suggestion and Correction
 
-The biggest surprise was how much a single weight choice (genre at +2.0) shapes the entire output. It seemed like a small design decision, but it effectively locks users into one genre no matter what else they prefer. That made me realize that real recommendation apps are making hundreds of these weight decisions, and each one quietly steers what millions of people hear.
+One flawed AI suggestion early in the build was to maintain parallel functional and class-based recommendation paths. That would have duplicated logic and created drift between implementations. The project was corrected by centralizing the scoring and ranking logic in the `Recommender` class, making `Song` and `UserProfile` the main internal data structures, and building the rest of the system around that single source of truth.
 
-Building this also changed how I think about "why" a song shows up in my Discover Weekly. Before, I assumed it was magic. Now I see it as a scoring function — just a much bigger one with more features and more data. The explanations we built into this system ("genre match, mood match, energy closeness") are something I wish real apps would show, because it would make it much easier to understand and trust the recommendations.
+## Future Improvements
+
+- expand the catalog to reduce missing-coverage cases and thin genre representation
+- improve retrieval with better snippet ranking or lightweight semantic search
+- add a self-check or rerank step for explicit constraint violations
+- calibrate confidence more formally using a larger evaluation set or human review
+- introduce diversity-aware ranking so the top results are not overly narrow when coverage improves
