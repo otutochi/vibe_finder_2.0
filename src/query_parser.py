@@ -18,6 +18,7 @@ GENRE_ALIASES = {
     "lofi": ("lofi", "lo-fi"),
     "metal": ("metal",),
     "pop": ("pop",),
+    "reggae": ("reggae",),
     "r&b": ("r&b", "rnb", "r and b"),
     "rock": ("rock",),
     "synthwave": ("synthwave", "synth-wave"),
