@@ -19,6 +19,8 @@ This project simulates a content-based music recommender. It scores every song i
 
 Real-world platforms like Spotify combine two main approaches: **collaborative filtering** (finding patterns across millions of users' behavior — plays, skips, saves, playlist adds) and **content-based filtering** (matching song attributes like genre, energy, and mood to a user's known preferences). Our simulation focuses on the content-based side, which is easier to explain, debug, and reason about with a small dataset.
 
+The repo also includes a small local knowledge base in `knowledge/`. These short notes on genres, moods, acousticness, listening contexts, and feature signals are meant for the upcoming retrieval layer so the system can look up supporting guidance before responding.
+
 ### Song Features
 
 Each `Song` in `data/songs.csv` carries these attributes:
